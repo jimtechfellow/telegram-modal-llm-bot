@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from modal_a100_chat.config import Config
@@ -32,6 +34,8 @@ def test_history_survives_restart_and_deduplicates(config):
             {"role": "user", "content": query},
             {"role": "assistant", "content": "中文回复"},
         ]
+        assert not restored.pending() and restored.last_job()["release_confirmed"] == 0
+        restored.request_completed_release()
         assert restored.pending()[0]["call_id"] == "fixture-call-id"
         restored.confirm_release(1)
         assert not restored.pending()
@@ -39,7 +43,7 @@ def test_history_survives_restart_and_deduplicates(config):
         restored.db.close()
 
 
-def test_legacy_completed_call_requires_release_confirmation(config):
+def test_legacy_completed_call_keeps_history_without_blocking_warm_reuse(config):
     """Local-only legacy SQLite fixture: no remote result or API call."""
     import sqlite3
 
@@ -56,7 +60,7 @@ def test_legacy_completed_call_requires_release_confirmation(config):
         )
     restored = Store(config.state_dir)
     try:
-        assert restored.pending()[0]["call_id"] == "local-only-call"
+        assert not restored.pending() and restored.last_job()["release_confirmed"] == 0
         restored.confirm_release(1)
         assert not restored.pending() and restored.last_job()["status"] == "completed"
     finally:
@@ -81,3 +85,26 @@ def test_load_config_without_removed_billing_gate(repository, tmp_path):
     path.write_text(text.replace("orcarouter/Qwen3.8-27B-Uncensored", "another/model"))
     with pytest.raises(ValueError, match="pinned"):
         Config.load(path)
+
+
+@pytest.mark.parametrize("seconds", [2, 300, 1200])
+def test_idle_timeout_accepts_native_range(config, seconds):
+    assert replace(config, gpu_idle_timeout_seconds=seconds).gpu_idle_timeout_seconds == seconds
+
+
+@pytest.mark.parametrize("seconds", [True, 1, 1201, 300.0, "300", None])
+def test_idle_timeout_rejects_invalid_configuration(config, seconds):
+    with pytest.raises(ValueError, match="GPU idle timeout"):
+        replace(config, gpu_idle_timeout_seconds=seconds)
+
+
+def test_old_config_defaults_to_five_minutes(repository, tmp_path):
+    text = (repository / "config.example.toml").read_text()
+    text = text.replace("REPLACE_WITH_VERIFIED_WORKSPACE", "fixture-workspace")
+    text = text.replace("allowed_chat_id = 0", "allowed_chat_id = 100000001")
+    text = text.replace("allowed_user_id = 0", "allowed_user_id = 100000001")
+    path = tmp_path / "config.toml"
+    path.write_text(text.replace("gpu_idle_timeout_seconds = 300", ""))
+    assert Config.load(path).gpu_idle_timeout_seconds == 300
+    path.write_text(text.replace("gpu_idle_timeout_seconds = 300", "gpu_idle_timeout_seconds = 123"))
+    assert Config.load(path).gpu_idle_timeout_seconds == 123

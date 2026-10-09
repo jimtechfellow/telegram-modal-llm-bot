@@ -5,6 +5,7 @@ import fcntl
 import logging
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 from telegram import Update
@@ -15,6 +16,19 @@ from .config import Config
 from .constants import MODEL_ID, MODEL_REVISION, VOLUME_NAME
 from .runner import Runner
 from .store import Store
+
+
+@contextmanager
+def exclusive_bot_lock(state_dir):
+    """Bot and mutating admin commands share this lock, including across processes."""
+    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (state_dir / "bot.lock").open("a") as lock:
+        os.chmod(lock.name, 0o600)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError("Bot or a mutating administrative operation is active") from None
+        yield
 
 
 def build_application(config, token):
@@ -61,10 +75,26 @@ def build_application(config, token):
             return
         last = store.last_job()
         lines = [f"模型：{MODEL_ID}", f"Revision：{MODEL_REVISION}", f"Volume：{VOLUME_NAME}"]
-        lines += [f"本地任务：{last['status'] if last else '无'}", f"可提交：{runner.ready}"]
+        lines += [
+            f"本地任务：{last['status'] if last else '无'}",
+            f"可提交：{runner.ready}",
+            f"空闲保留配置：{config.gpu_idle_timeout_seconds} 秒",
+            f"最近确认空闲窗口：{runner.backend.effective_idle_seconds} 秒",
+        ]
         try:
             stats = await runner.backend.stats()
+            if not any(stats.values()):
+                store.confirm_completed_releases()
+            if runner.releasing:
+                state = "释放中或释放未确认"
+            elif stats["num_running_inputs"] or stats["backlog"]:
+                state = "推理中" if runner.active else "存在未确认调用"
+            elif runner.active and not runner.active.completed:
+                state = "正在提交或等待推理"
+            else:
+                state = "暖容器空闲（仍计费）" if stats["num_total_runners"] else "已释放"
             lines += [
+                f"GPU 状态：{state}",
                 f"GPU 容器：{stats['num_total_runners']}",
                 f"运行请求：{stats['num_running_inputs']}；排队：{stats['backlog']}",
             ]
@@ -123,10 +153,7 @@ def _main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         parser.error("Inject TELEGRAM_BOT_TOKEN into the process environment")
-    lock_path = config.state_dir / "bot.lock"
-    config.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with lock_path.open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with exclusive_bot_lock(config.state_dir):
         app = build_application(config, token)
         app.run_polling(
             timeout=30, drop_pending_updates=False, allowed_updates=["message"], bootstrap_retries=0

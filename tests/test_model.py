@@ -8,7 +8,7 @@ import pytest
 
 from modal_a100_chat.constants import GPU, MODEL_DIR, MODEL_ID, MODEL_REVISION, VOLUME_NAME
 from modal_a100_chat.inference import engine_options, fit_prompt
-from modal_a100_chat.modal_app import SINGLE_USE
+from modal_a100_chat.modal_app import GPU_REUSE, SINGLE_USE
 from modal_a100_chat.weights import digest_file, load_manifest, read_safetensors_header, verify
 
 
@@ -111,6 +111,14 @@ def test_engine_remains_bf16_single_gpu():
     assert options["max_num_seqs"] == 1 and options["enforce_eager"]
     assert SINGLE_USE == dict(
         max_containers=1, min_containers=0, buffer_containers=0, single_use_containers=True, retries=0
+    )
+    assert GPU_REUSE == dict(
+        max_containers=1,
+        min_containers=0,
+        buffer_containers=0,
+        single_use_containers=False,
+        scaledown_window=300,
+        retries=0,
     )
 
 

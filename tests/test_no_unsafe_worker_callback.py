@@ -3,11 +3,11 @@
 import ast
 import inspect
 
-from modal_a100_chat.inference import run_inference
+from modal_a100_chat.inference import load_engine, run_inference
 
 
 def test_inference_does_not_require_insecure_callback_serialization():
-    source = inspect.getsource(run_inference)
+    source = inspect.getsource(load_engine) + "\n" + inspect.getsource(run_inference)
     tree = ast.parse(source)
     calls = [
         node.func.attr

@@ -11,3 +11,5 @@ model_revision = "8cb32d72080f6a47bf34dc5adf8067daa6c63a31"
 state_dir = "~/.local/state/modal_a100_chat"
 system_prompt = "You are a helpful assistant. Answer clearly and accurately."
 request_timeout_seconds = 1200
+# Idle GPU containers remain billable; Modal scales down automatically (2..1200 seconds).
+gpu_idle_timeout_seconds = 300

@@ -15,15 +15,17 @@ from uuid import uuid4
 
 import modal
 
-from .backend import ModalBackend, validate_result
+from .backend import ModalBackend, set_idle_window, validate_result
+from .bot import exclusive_bot_lock
 from .config import Config
 from .constants import APP_NAME, MODEL_CACHE_KEY, MODEL_ID, MODEL_REVISION, VOLUME_NAME
+from .store import Store
 from .weights import load_manifest
 
 
 def local_check():
     from .inference import engine_options
-    from .modal_app import SINGLE_USE
+    from .modal_app import GPU_REUSE, SINGLE_USE
 
     root = Path(__file__).resolve().parents[2]
     manifest = load_manifest(root / "model-manifest.json")
@@ -35,7 +37,7 @@ def local_check():
         "volume": VOLUME_NAME,
         "files": len(manifest["files"]),
         "engine_options": engine_options(),
-        "container_settings": SINGLE_USE,
+        "container_settings": {"infer": GPU_REUSE, "download_model": SINGLE_USE},
         "actual_gpu_load": "NOT_RUN",
     }
 
@@ -49,6 +51,21 @@ async def wait_idle(function, timeout=90):
         if time.monotonic() >= deadline:
             raise TimeoutError("Container release has not been confirmed")
         await asyncio.sleep(2)
+
+
+async def release_function(function, function_name):
+    if function_name == "infer":
+        await set_idle_window(function, 2)
+    return await wait_idle(function)
+
+
+def assert_no_pending_bot_jobs(state_dir):
+    store = Store(state_dir)
+    try:
+        if store.pending():
+            raise RuntimeError("Resolve durable bot calls before administrative GPU operations")
+    finally:
+        store.db.close()
 
 
 _ADMIN_LOCK = Lock()
@@ -92,8 +109,11 @@ def _reserve_admin_call(state_dir, function_name, environment):
     if function_name not in {"infer", "download_model"} or not environment:
         raise RuntimeError("Administrative function target is not confirmed")
     record = {
-        "call_id": None, "app": APP_NAME, "function": function_name,
-        "environment": environment, "operation_id": uuid4().hex,
+        "call_id": None,
+        "app": APP_NAME,
+        "function": function_name,
+        "environment": environment,
+        "operation_id": uuid4().hex,
     }
     try:
         _write_new_record(state_dir / "admin-call.json", record)
@@ -132,15 +152,18 @@ def _clear_admin_call(state_dir, record):
     _sync_state_dir(state_dir)
 
 
-async def collect(
-    call, state_dir, max_seconds=4200, *, function, function_name, environment, record=None
-):
+async def collect(call, state_dir, max_seconds=4200, *, function, function_name, environment, record=None):
     if record is None:
         with _admin_lock(state_dir):
             record = _reserve_admin_call(state_dir, function_name, environment)
             return await collect(
-                call, state_dir, max_seconds, function=function, function_name=function_name,
-                environment=environment, record=record,
+                call,
+                state_dir,
+                max_seconds,
+                function=function,
+                function_name=function_name,
+                environment=environment,
+                record=record,
             )
     if record["function"] != function_name or record["environment"] != environment:
         raise RuntimeError("Administrative function target differs from durable record")
@@ -160,7 +183,7 @@ async def collect(
             except (ModalTimeoutError, TimeoutError):
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Administrative call exceeded its bounded wait") from None
-        release = await wait_idle(function)
+        release = await release_function(function, function_name)
         _clear_admin_call(state_dir, record)
         return result, release
     except BaseException:
@@ -171,7 +194,7 @@ async def collect(
                 pass
             # Cancellation acknowledgement or failure is not release confirmation.
             try:
-                await wait_idle(function)
+                await release_function(function, function_name)
                 _clear_admin_call(state_dir, record)
             except BaseException:
                 pass
@@ -182,7 +205,10 @@ async def execute(args, config):
     with _admin_lock(config.state_dir):
         if args.command in {"download", "smoke"} and (config.state_dir / "admin-call.json").exists():
             raise RuntimeError("An unconfirmed administrative call already exists")
-        return await _execute(args, config)
+        if args.command == "status":
+            return await _execute(args, config)
+        with exclusive_bot_lock(config.state_dir):
+            return await _execute(args, config)
 
 
 async def _execute(args, config):
@@ -230,6 +256,7 @@ async def _execute(args, config):
             {"infer": gpu_image.object_id, "download_model": cpu_image.object_id},
             volume.object_id,
             secret.object_id,
+            gpu_idle_timeout_seconds=config.gpu_idle_timeout_seconds,
         )
         return {
             "status": "PASS",
@@ -246,8 +273,12 @@ async def _execute(args, config):
         # Reserve before spawn: interruption without a returned id must fail closed.
         record = _reserve_admin_call(config.state_dir, "download_model", environment)
         report, release = await collect(
-            await function.spawn.aio(), config.state_dir, function=function,
-            function_name="download_model", environment=environment, record=record,
+            await function.spawn.aio(),
+            config.state_dir,
+            function=function,
+            function_name="download_model",
+            environment=environment,
+            record=record,
         )
         volume = modal.Volume.from_name(VOLUME_NAME, environment_name=environment)
         chunks = []
@@ -261,6 +292,12 @@ async def _execute(args, config):
         report["container_release"] = release
         return report
     if args.command == "smoke":
+        await backend.check_inference()
+        assert_no_pending_bot_jobs(config.state_dir)
+        stats = await backend.stats()
+        if stats["num_running_inputs"] or stats["backlog"] or stats["num_total_runners"] > 1:
+            raise RuntimeError("Unowned remote inference calls prevent administrative GPU operations")
+        await backend.configure()
         record = _reserve_admin_call(config.state_dir, "infer", environment)
         result, release = await collect(
             await backend.spawn(
@@ -270,7 +307,10 @@ async def _execute(args, config):
                 ]
             ),
             config.state_dir,
-            function=backend.function, function_name="infer", environment=environment, record=record,
+            function=backend.function,
+            function_name="infer",
+            environment=environment,
+            record=record,
         )
         validate_result(result)
         result["container_release"] = release
@@ -281,9 +321,11 @@ async def _execute(args, config):
         path = config.state_dir / "admin-call.json"
         record = json.loads(path.read_text())
         if (
-            record.get("app") != APP_NAME or record.get("environment") != environment
+            record.get("app") != APP_NAME
+            or record.get("environment") != environment
             or record.get("function") not in {"infer", "download_model"}
-            or not record.get("call_id") or not record.get("operation_id")
+            or not record.get("call_id")
+            or not record.get("operation_id")
         ):
             raise RuntimeError(
                 "Administrative call target or identifier is unconfirmed; scoped stop required"
@@ -291,11 +333,14 @@ async def _execute(args, config):
         function = modal.Function.from_name(
             APP_NAME, record["function"], environment_name=record["environment"]
         )
+        if record["function"] == "infer":
+            await backend.check_inference()
+            assert_no_pending_bot_jobs(config.state_dir)
         call = modal.FunctionCall.from_id(record["call_id"])
         try:
             await call.cancel.aio(terminate_containers=True)
         finally:
-            release = await wait_idle(function)
+            release = await release_function(function, record["function"])
             _clear_admin_call(config.state_dir, record)
         return {"status": "cancelled", "call_id": call.object_id, "container_release": release}
     if args.command == "stop-app":

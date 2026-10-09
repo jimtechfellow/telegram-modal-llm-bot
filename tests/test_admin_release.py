@@ -27,12 +27,24 @@ def local_result():
 @pytest.fixture
 def local_admin(monkeypatch):
     state = SimpleNamespace(
-        spawns=0, cancels=0, idle_checks=[], fail_get=False, fail_cancel=False,
-        fail_idle=False, interrupt_get=False, interrupt_spawn=False, interrupt_cancel=False,
-        get_entered=asyncio.Event(), get_release=asyncio.Event(), idle_hook=None,
+        spawns=0,
+        cancels=0,
+        idle_checks=[],
+        fail_get=False,
+        fail_cancel=False,
+        fail_idle=False,
+        interrupt_get=False,
+        interrupt_spawn=False,
+        interrupt_cancel=False,
+        get_entered=asyncio.Event(),
+        get_release=asyncio.Event(),
+        idle_hook=None,
         lookups=[],
     )
     state.get_release.set()
+
+    async def scaling(**kwargs):
+        return SimpleNamespace(**kwargs)
 
     async def get(**kwargs):
         assert kwargs["timeout"] == 15
@@ -63,7 +75,11 @@ def local_admin(monkeypatch):
         return state.call
 
     state.functions = {
-        name: SimpleNamespace(name=name, spawn=SimpleNamespace(aio=spawn))
+        name: SimpleNamespace(
+            name=name,
+            spawn=SimpleNamespace(aio=spawn),
+            update_autoscaler=SimpleNamespace(aio=scaling),
+        )
         for name in ("infer", "download_model")
     }
 
@@ -82,6 +98,15 @@ def local_admin(monkeypatch):
 
         async def check_workspace(self):
             pass
+
+        async def check_inference(self):
+            pass
+
+        async def configure(self):
+            pass
+
+        async def stats(self):
+            return {"num_total_runners": 0, "num_running_inputs": 0, "backlog": 0}
 
         async def spawn(self, messages):
             return await spawn(messages)
@@ -115,8 +140,11 @@ def args(command):
 
 def seed_record(config, **overrides):
     record = {
-        "call_id": "local-only-admin-call", "app": APP_NAME, "function": "download_model",
-        "environment": config.modal_environment, "operation_id": "local-only-record-owner",
+        "call_id": "local-only-admin-call",
+        "app": APP_NAME,
+        "function": "download_model",
+        "environment": config.modal_environment,
+        "operation_id": "local-only-record-owner",
     }
     record.update(overrides)
     config.state_dir.mkdir(parents=True, exist_ok=True)
@@ -199,6 +227,29 @@ async def test_existing_admin_record_blocks_before_any_spawn(config, local_admin
         await admin.execute(args(command), config)
     assert local_admin.spawns == 0
     assert json.loads(path.read_text()) == record
+
+
+@pytest.mark.parametrize("command", ["smoke", "cancel-admin", "deploy", "download", "stop-app"])
+async def test_running_bot_blocks_mutating_admin_commands(config, local_admin, command):
+    from modal_a100_chat.bot import exclusive_bot_lock
+
+    with exclusive_bot_lock(config.state_dir), pytest.raises(RuntimeError, match="Bot or"):
+        await admin.execute(args(command), config)
+    assert local_admin.spawns == local_admin.cancels == 0
+
+
+async def test_pending_bot_call_blocks_admin_smoke_before_spawn(config, local_admin):
+    from modal_a100_chat.store import Store
+
+    store = Store(config.state_dir)
+    try:
+        store.start(1, config.allowed_chat_id, "fixture")
+        store.set_call(1, "fixture-bot-call")
+        with pytest.raises(RuntimeError, match="durable bot calls"):
+            await admin.execute(args("smoke"), config)
+        assert local_admin.spawns == local_admin.cancels == 0
+    finally:
+        store.db.close()
 
 
 @pytest.mark.parametrize("command,other_state", [("smoke", False), ("cancel-admin", False), ("smoke", True)])

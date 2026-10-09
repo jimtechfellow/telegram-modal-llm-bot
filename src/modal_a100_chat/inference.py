@@ -1,10 +1,13 @@
-"""Offline single-request vLLM; evidence comes from the loaded engine, not its label."""
+"""One verified vLLM engine per container; sequential calls reuse loaded weights."""
 
 import json
+import os
 import re
 import subprocess
 import time
+from functools import lru_cache
 from pathlib import Path
+from uuid import uuid4
 
 from .constants import (
     GPU,
@@ -56,10 +59,11 @@ def fit_prompt(tokenizer, messages):
         del messages[start : start + 2]  # trim complete historical user/assistant pairs only
 
 
-def run_inference(messages, manifest_path):
+@lru_cache(maxsize=1)
+def load_engine(manifest_path):
     import torch
     import vllm
-    from vllm import LLM, SamplingParams
+    from vllm import LLM
 
     from .weights import load_manifest
 
@@ -93,17 +97,7 @@ def run_inference(messages, manifest_path):
     loaded = llm.llm_engine.vllm_config.model_config
     if str(loaded.model) != MODEL_DIR or str(loaded.dtype) != "torch.bfloat16" or loaded.quantization:
         raise RuntimeError("Loaded model path/dtype/quantization mismatch")
-    prompt, used_messages = fit_prompt(llm.get_tokenizer(), messages)
-    output = llm.generate(
-        [prompt],
-        SamplingParams(max_tokens=MAX_OUTPUT_TOKENS, temperature=0.7, top_p=0.9),
-        use_tqdm=False,
-    )[0]
-    text = re.sub(r"<think>.*?</think>", "", output.outputs[0].text, flags=re.S).strip()
-    if not text:
-        raise RuntimeError("The model produced no final text")
-    return {
-        "text": text,
+    return llm, {
         "model_id": MODEL_ID,
         "revision": MODEL_REVISION,
         "loaded_model_path": str(loaded.model),
@@ -117,6 +111,32 @@ def run_inference(messages, manifest_path):
         "volume_name": VOLUME_NAME,
         "manifest_sha256": marker["manifest_sha256"],
         "vllm_version": vllm.__version__,
+        "container_id": os.environ["MODAL_TASK_ID"],
+        "engine_instance_id": uuid4().hex,
+        "engine_load_seconds": time.monotonic() - start,
+    }
+
+
+def run_inference(messages, manifest_path):
+    from vllm import SamplingParams
+
+    start = time.monotonic()
+    hits = load_engine.cache_info().hits
+    llm, evidence = load_engine(manifest_path)
+    reused = load_engine.cache_info().hits > hits
+    prompt, used_messages = fit_prompt(llm.get_tokenizer(), messages)
+    output = llm.generate(
+        [prompt],
+        SamplingParams(max_tokens=MAX_OUTPUT_TOKENS, temperature=0.7, top_p=0.9),
+        use_tqdm=False,
+    )[0]
+    text = re.sub(r"<think>.*?</think>", "", output.outputs[0].text, flags=re.S).strip()
+    if not text:
+        raise RuntimeError("The model produced no final text")
+    return {
+        **evidence,
+        "text": text,
+        "engine_reused": reused,
         "context_messages": len(used_messages),
         "prompt_tokens": len(output.prompt_token_ids),
         "output_tokens": len(output.outputs[0].token_ids),

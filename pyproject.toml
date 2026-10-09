@@ -1,7 +1,7 @@
 [project]
 name = "modal-a100-chat"
 version = "0.1.0"
-description = "Private Telegram polling bot for fixed BF16 Qwen3.8-27B on single-use Modal A100-80GB"
+description = "Private Telegram polling bot for fixed BF16 Qwen3.8-27B on reusable Modal A100-80GB"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

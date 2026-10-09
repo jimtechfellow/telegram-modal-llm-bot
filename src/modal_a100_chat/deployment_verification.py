@@ -4,14 +4,15 @@ from dataclasses import asdict
 
 import modal
 
-from .constants import GPU
+from .constants import DEFAULT_GPU_IDLE_SECONDS, GPU
 
 
 def assert_function_info(name, info, image_id, volume_id, hf_secret_id):
     infer = name == "infer"
     if (
         info.gpus != ([(GPU, 1)] if infer else [])
-        or info.single_use_containers is not True
+        or info.single_use_containers is not (not infer)
+        or info.concurrency_info is not None
         or info.max_retries != 0
         or info.timeout != (1200 if infer else 3600)
         or info.image_info.image_id != image_id
@@ -38,17 +39,31 @@ def assert_function_info(name, info, image_id, volume_id, hf_secret_id):
         raise RuntimeError("Deployed model Volume identity/access mismatch")
 
 
-async def verify_remote_settings(function_ids, image_ids, volume_id, hf_secret_id):
+async def verify_remote_settings(
+    function_ids,
+    image_ids,
+    volume_id,
+    hf_secret_id,
+    gpu_idle_timeout_seconds=DEFAULT_GPU_IDLE_SECONDS,
+):
     evidence = {}
     for name, identifier in function_ids.items():
         function = modal.Function.from_id(identifier)
         # Explicitly set only this project's safe limits using the public SDK.
-        await function.update_autoscaler.aio(min_containers=0, max_containers=1, buffer_containers=0)
+        window = {"scaledown_window": gpu_idle_timeout_seconds} if name == "infer" else {}
+        await function.update_autoscaler.aio(
+            min_containers=0,
+            max_containers=1,
+            buffer_containers=0,
+            **window,
+        )
         # The documented no-argument call preserves all values and returns CURRENT effective settings.
         # Function.info exposes the remaining safety fields but not autoscaler limits in SDK1.6.1.
         scaling = await function.update_autoscaler.aio()
         if (scaling.min_containers, scaling.max_containers, scaling.buffer_containers) != (0, 1, 0):
             raise RuntimeError("Effective deployed autoscaler settings mismatch")
+        if name == "infer" and scaling.scaledown_window != gpu_idle_timeout_seconds:
+            raise RuntimeError("Effective deployed GPU idle timeout mismatch")
         info = await function.info.aio(refresh=True)
         assert_function_info(name, info, image_ids[name], volume_id, hf_secret_id)
         if await function.get_web_url.aio():

@@ -4,7 +4,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .constants import MODEL_ID, MODEL_REVISION
+from .constants import DEFAULT_GPU_IDLE_SECONDS, MODEL_ID, MODEL_REVISION
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,11 @@ class Config:
     request_timeout_seconds: int = 1200
     model_id: str = MODEL_ID
     model_revision: str = MODEL_REVISION
+    gpu_idle_timeout_seconds: int = DEFAULT_GPU_IDLE_SECONDS
+
+    def __post_init__(self):
+        if type(self.gpu_idle_timeout_seconds) is not int or not 2 <= self.gpu_idle_timeout_seconds <= 1200:
+            raise ValueError("GPU idle timeout must be an integer in 2..1200 seconds")
 
     @classmethod
     def load(cls, path: Path):

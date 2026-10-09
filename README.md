@@ -10,7 +10,7 @@ Telegram user
     ↕ Telegram Bot API (long polling)
 Linux CPU host: Python bot + SQLite history
     ↕ authenticated Modal Python SDK function calls
-Modal: single-use A100-80GB container + vLLM
+Modal: reusable A100-80GB container + cached vLLM engine
     ↕ read-only Modal Volume
 Pinned Qwen3.8-27B-Uncensored BF16 weights
 ```
@@ -21,7 +21,7 @@ Pinned Qwen3.8-27B-Uncensored BF16 weights
 - Completed user/assistant turns are stored in SQLite on the CPU host. Recent history is resent with each request and trimmed to fit the context window.
 - Results are sent after generation completes, not streamed token by token.
 - One inference at a time. Remote retries are disabled. Ambiguous submissions or unconfirmed release block further requests instead of silently resubmitting.
-- GPU containers are single-use, with `min_containers=0`, `buffer_containers=0` and `max_containers=1`. The bot stays online while the GPU scales to zero.
+- The first message starts a GPU container and loads the model. Subsequent messages reuse its engine while the container remains alive. `min_containers=0`, `buffer_containers=0`, `max_containers=1` and a finite `scaledown_window` let Modal automatically scale back to zero without a local timer or keepalive requests.
 - No web search, browser tools, agent loop, shell execution tools or image/video input. Current bot help/status messages are in Chinese; the model can answer in other languages.
 
 ## Pinned model and runtime
@@ -62,6 +62,7 @@ Edit the copied file, not the published example:
 - Replace **both** zero ID placeholders with your own confirmed private chat/user IDs.
 - Set `modal_workspace` to your actual workspace and select `modal_environment`.
 - Choose a private `state_dir` outside the checkout and your own `system_prompt`.
+- `gpu_idle_timeout_seconds` defaults to 300 seconds (5 minutes); allowed values are integers from 2 to 1200. Older configs without this field use 300. Idle GPU residency is billable.
 - Leave the pinned model/revision unchanged for the supported deployment.
 
 The Python package and CLI retain their existing names: `modal_a100_chat`, `modal-a100-chat` and `modal-a100-admin`.
@@ -106,19 +107,25 @@ Deployment/image builds and CPU downloads can consume billable provider resource
 
 Send ordinary text **without a leading slash** to request an answer. `/start` and other unsupported inputs return a short help message and do not invoke inference.
 
-- `/status`: reports the fixed model, local job state, GPU container count, running inputs and backlog.
-- `/stop`: requests cancellation, terminates the remote container and confirms all remote counters are zero before reporting release.
+- `/status`: reports the fixed model, local job state, configured/recently confirmed idle window, GPU container count, running inputs and backlog. It distinguishes warm idle residency from released compute. It never invokes inference or sends keepalives.
+- `/stop`: cancels the exact running call with container termination. When the GPU is already idle, it requests release by shortening this function's native idle window to 2 seconds, without launching another GPU call. Actual release is confirmed only when all three counters are zero; shutdown confirmation waits up to 90 seconds, after which new jobs remain blocked. The configured window is restored before the next request.
 - An initial cancellation acknowledgement is not the final shutdown confirmation. Wait for the final confirmation, then check `/status`.
 - `Can submit: True` is not proof of release. Verify **containers = 0, running requests = 0, backlog = 0**.
 - A Modal dashboard **Live App** can remain deployed while its **Containers: 0 live** and **Calls: 0 running** counters show no active compute.
 
 The admin CLI also provides `status`, `cancel-admin`, `stop-app` and `smoke`. Mutating operations require `--execute`; **`smoke --execute` allocates a GPU**. Do not invoke it as part of an offline source check.
 
+The bot and mutating admin commands share `state_dir/bot.lock`; stop the bot before deployment or administrative GPU tests. They must use the same `state_dir` and dedicated Modal function/environment. Inference is serial, remote retries are disabled, and cancellation never uses workspace-wide or app-wide shutdown. Unknown running/queued calls block idle `/stop` instead of being cancelled. External clients bypassing these locks are outside the supported single-user setup.
+
 SQLite history is stored at `state_dir/history.sqlite3`. Completed turns survive reopening the database; cancelled turns do not enter conversation history. If the bot restarts, it handles recorded unfinished calls instead of replaying inference. A spawn whose call ID was never durably recorded fails closed and requires scoped operator recovery. Do not delete durable records while a remote task may still exist.
+
+Completion and GPU release are separate: an ordinary completed turn can have `release_confirmed=0` while its container remains warm, and does not block the next turn. Explicit release requests that remain unconfirmed are durable and do block new turns, including after restart. Existing SQLite databases remain compatible; no history rewrite or new table is required. GPU evidence stored with each completed job includes `container_id`, `engine_instance_id`, `engine_reused` and `engine_load_seconds`.
 
 ## Costs, cold starts and privacy
 
-Single-use containers trade idle GPU cost for startup latency: **each inference starts a new container and reloads weights from the Volume**. Cached weights avoid downloading from Hugging Face again, but do not keep the model resident in GPU memory. Responses may take minutes during cold startup. Model loading time also contributes to compute usage.
+The first request after scale-to-zero loads weights from the Volume; later requests reuse the cached engine in the same container. After the last inference, Modal releases idle compute using `scaledown_window`. This is a maximum idle policy, not a guarantee of 300 seconds of residency: platform recycling or preemption can cause an earlier cold start. See [Modal cold-start and idle-window documentation](https://modal.com/docs/guide/cold-start). No permanently warm pool or heartbeat is configured, and the native policy still works if the bot process crashes.
+
+At the published base rates checked on 2026-10-09, A100 80GB costs $0.000694/second (about $2.4984/hour). A full 300-second idle tail therefore costs about **$0.2082 for the GPU**, or **$0.2879 including the current 4-core CPU and 96 GiB memory requests**, before credits, taxes, regional modifiers or excess resource usage. This tail is per continuous warm session, not a fixed charge per message: gaps between turns are also billable. Model loading and generation add compute charges. Frequent chats avoid repeated loading; sparse chats can cost more than single-use containers. Consult [current pricing](https://modal.com/pricing) and [CPU/memory billing](https://modal.com/docs/guide/resources#billing) for actual charges.
 
 Scale-to-zero is not a budget cap or a promise of free usage. GPU/CPU compute, memory, model storage and other provider charges may apply. Configure budgets and spending limits in your own Modal account and consult [current Modal pricing](https://modal.com/pricing). A request timeout or cancellation acknowledgement alone does not prove compute has stopped.
 
@@ -134,7 +141,21 @@ uv run --frozen modal-a100-admin local-check
 
 The tests use synthetic data and local SDK doubles for authorization, SQLite persistence, deduplication, cancellation/release handling, model-manifest validation, context trimming and credential-bearing exception redaction. Network access is blocked in the pytest process. They do **not** deploy resources, download real weights, run a GPU, verify current billing or substitute for an end-to-end Telegram deployment test.
 
-The source-publication checks are intentionally offline; GPU retesting is not part of this release.
+The reuse, lifecycle, concurrency and recovery tests use synthetic engines and remote counters. Passing them proves the local behavior, not real GPU reuse, provider shutdown timing or billing.
+
+## Upgrade and real GPU acceptance (not executed by offline development)
+
+After separate authorization for production deployment and paid GPU testing:
+
+1. Save the old checkout reference and process configuration. Stop the existing bot and confirm its remote counters are zero. Back up the private TOML config and SQLite using SQLite's backup API; retain the state directory and verified model Volume.
+2. Install this branch in a separate checkout with `uv sync --frozen --extra dev --python 3.11`. Use the existing private config and credentials. Set `gpu_idle_timeout_seconds = 300`, or rely on the default.
+3. Run `modal-a100-admin --config /path/to/config.toml deploy --execute` from the new environment. It verifies reusable serial inference, zero minimum/buffer containers, a one-container maximum and the configured idle window. The existing verified model Volume can be reused without another download. Deploy may build images/update this app's Secret and is a separate authorized operation.
+4. Point the bot process at the new checkout/environment and start it. The new bot refuses an old single-use or concurrent deployment instead of silently running with mismatched lifecycle controls.
+5. Send two different messages within the idle window. Check the SQLite job evidence: both `container_id` and `engine_instance_id` must match, and the second result must have `engine_reused=true`. Confirm four new history messages and only one GPU container.
+6. Send no further inference requests. Poll `/status` or admin `status` (neither allocates compute) and verify all three counters reach zero after the idle window, allowing a bounded observation margin of 90 seconds. If they do not, record the test as failed/unconfirmed; do not declare release. The next message should use a new container/engine.
+7. Test `/stop` both during inference and during warm idle time, including immediately after submission. Require confirmed zero counters, no cancelled turn in history, and a successful new cold request afterward.
+
+Real GPU reuse, automatic release, active/idle cancellation and actual costs remain **NOT_RUN** until these checks are performed. Rollback requires stopping the new bot, confirming release, restoring the prior checkout/config/process path, and redeploying the baseline Modal code before restarting the old bot. Preserve the SQLite history and Volume; no data deletion is needed.
 
 ## License
 

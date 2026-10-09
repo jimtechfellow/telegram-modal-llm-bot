@@ -1,11 +1,11 @@
-"""Official Modal Functions only: no public inference endpoint or warm GPU pool."""
+"""Private Modal Functions: one reusable GPU container that scales to zero."""
 
 import json
 from pathlib import Path
 
 import modal
 
-from .constants import APP_NAME, GPU, MODEL_DIR, VOLUME_NAME
+from .constants import APP_NAME, DEFAULT_GPU_IDLE_SECONDS, GPU, MODEL_DIR, VOLUME_NAME
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = "/opt/model-manifest.json"
@@ -39,6 +39,14 @@ SINGLE_USE = dict(
     single_use_containers=True,
     retries=0,
 )
+GPU_REUSE = dict(
+    max_containers=1,
+    min_containers=0,
+    buffer_containers=0,
+    single_use_containers=False,
+    scaledown_window=DEFAULT_GPU_IDLE_SECONDS,
+    retries=0,
+)
 
 
 @app.function(
@@ -69,7 +77,7 @@ def download_model():
     timeout=1200,
     startup_timeout=600,
     block_network=True,
-    **SINGLE_USE,
+    **GPU_REUSE,
 )
 def infer(messages):
     from .inference import run_inference

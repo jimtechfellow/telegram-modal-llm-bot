@@ -76,6 +76,23 @@ class Store:
                 (status, error, update_id),
             )
 
+    def request_completed_release(self):
+        # Reuse the existing error field to durably distinguish an explicit /stop
+        # from ordinary completed calls whose GPU is intentionally still warm.
+        with self.db:
+            self.db.execute(
+                "UPDATE jobs SET error='gpu_release_requested' "
+                "WHERE status='completed' AND release_confirmed=0"
+            )
+
+    def confirm_completed_releases(self):
+        # Only call after the exact inference pool is observed at zero.
+        with self.db:
+            self.db.execute(
+                "UPDATE jobs SET release_confirmed=1, error=NULL "
+                "WHERE status='completed' AND release_confirmed=0"
+            )
+
     def history(self, chat_id):
         rows = self.db.execute(
             "SELECT role, content FROM (SELECT id, role, content FROM messages "
@@ -89,7 +106,7 @@ class Store:
             dict(row)
             for row in self.db.execute(
                 "SELECT * FROM jobs WHERE status IN ('starting', 'running', 'cancel_requested') "
-                "OR (status='completed' AND release_confirmed=0)"
+                "OR (status='completed' AND release_confirmed=0 AND error='gpu_release_requested')"
             )
         ]
 

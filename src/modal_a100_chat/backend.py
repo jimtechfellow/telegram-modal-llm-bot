@@ -7,19 +7,58 @@ from dataclasses import asdict
 import modal
 from modal.exception import TimeoutError as ModalTimeoutError
 
-from .constants import APP_NAME, MODEL_DIR, MODEL_ID, MODEL_REVISION
+from .constants import APP_NAME, GPU, MODEL_DIR, MODEL_ID, MODEL_REVISION
+
+
+async def set_idle_window(function, seconds):
+    """Update the existing pool, never create a Function.with_options variant."""
+    scaling = await function.update_autoscaler.aio(
+        min_containers=0,
+        max_containers=1,
+        buffer_containers=0,
+        scaledown_window=seconds,
+    )
+    if (
+        scaling.min_containers,
+        scaling.max_containers,
+        scaling.buffer_containers,
+        scaling.scaledown_window,
+    ) != (0, 1, 0, seconds):
+        raise RuntimeError("Effective GPU autoscaler settings mismatch")
+    return scaling
 
 
 class ModalBackend:
     def __init__(self, config):
         self.config = config
         self.function = modal.Function.from_name(APP_NAME, "infer", environment_name=config.modal_environment)
+        self.effective_idle_seconds = None
+
+    async def configure(self):
+        await set_idle_window(self.function, self.config.gpu_idle_timeout_seconds)
+        self.effective_idle_seconds = self.config.gpu_idle_timeout_seconds
+
+    async def release(self):
+        # The shortest native window releases an idle container without a new GPU input.
+        await set_idle_window(self.function, 2)
+        self.effective_idle_seconds = 2
+        return await self.wait_idle()
 
     async def check_workspace(self):
         workspace = modal.Workspace.from_context()
         await workspace.hydrate.aio()
         if workspace.name != self.config.modal_workspace:
             raise RuntimeError("Modal credential workspace differs from configuration")
+
+    async def check_inference(self):
+        info = await self.function.info.aio(refresh=True)
+        if (
+            info.single_use_containers
+            or info.concurrency_info is not None
+            or info.gpus != [(GPU, 1)]
+            or info.max_retries != 0
+        ):
+            raise RuntimeError("Deployed inference must use the dedicated serial reusable GPU function")
 
     async def spawn(self, messages):
         return await self.function.spawn.aio(messages)

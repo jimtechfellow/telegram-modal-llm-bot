@@ -12,6 +12,14 @@ import pytest
 from modal_a100_chat import admin
 
 
+@pytest.fixture(autouse=True)
+def local_scaler(monkeypatch):
+    async def scaling(function, seconds):
+        assert seconds == 2
+
+    monkeypatch.setattr(admin, "set_idle_window", scaling)
+
+
 @pytest.mark.parametrize("cancel_fails", [False, True])
 @pytest.mark.parametrize("idle_fails", [False, True])
 async def test_admin_failed_wait_retains_id_until_idle_confirmed(
@@ -109,7 +117,7 @@ async def test_admin_idle_deadline_remains_bounded(monkeypatch):
 
 
 def test_admin_lock_is_exclusive_across_local_processes_and_reusable(tmp_path, repository):
-    script = '''
+    script = """
 import sys
 from pathlib import Path
 from modal_a100_chat.admin import _admin_lock
@@ -118,12 +126,15 @@ try:
         raise AssertionError("local-only lock unexpectedly acquired")
 except RuntimeError as exc:
     print(type(exc).__name__)
-'''
+"""
     env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(repository / "src")}
     with admin._admin_lock(tmp_path):
         result = subprocess.run(
             [sys.executable, "-c", script, str(tmp_path)],
-            env=env, capture_output=True, text=True, timeout=15,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
     assert result.returncode == 0 and result.stdout.strip() == "RuntimeError" and result.stderr == ""
     with admin._admin_lock(tmp_path):

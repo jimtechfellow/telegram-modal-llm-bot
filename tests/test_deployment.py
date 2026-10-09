@@ -11,7 +11,8 @@ from modal_a100_chat.deployment_verification import assert_function_info, verify
 def info(name="infer"):
     return SimpleNamespace(
         gpus=[("A100-80GB", 1)] if name == "infer" else [],
-        single_use_containers=True,
+        single_use_containers=name != "infer",
+        concurrency_info=None,
         max_retries=0,
         timeout=1200 if name == "infer" else 3600,
         image_info=SimpleNamespace(image_id="fixture-image-" + name),
@@ -39,7 +40,8 @@ def test_valid_exact_deployed_metadata():
         ("gpus", [("A100-40GB", 1)]),
         ("gpus", [("A100-80GB", 2)]),
         ("gpus", [("A100-80GB", 1), ("H100", 1)]),
-        ("single_use_containers", False),
+        ("single_use_containers", True),
+        ("concurrency_info", SimpleNamespace(max_inputs=2, target_inputs=2)),
         ("max_retries", 1),
         ("max_retries", None),
         ("web_info", SimpleNamespace(web_url="https://unit.invalid")),
@@ -89,7 +91,7 @@ async def test_official_effective_settings_readback(monkeypatch, web_url):
 
         async def scaler(self, **kwargs):
             calls.append(kwargs)
-            return Settings(0, 1, 0, 2)
+            return Settings(0, 1, 0, 300)
 
         async def url(self):
             return web_url
@@ -107,4 +109,7 @@ async def test_official_effective_settings_readback(monkeypatch, web_url):
         {"infer": "fixture-id"}, {"infer": "fixture-image"}, "fixture-volume", "fixture-secret"
     )
     assert report["infer"]["autoscaler"]["min_containers"] == 0
-    assert calls == [{"min_containers": 0, "max_containers": 1, "buffer_containers": 0}, {}]
+    assert calls == [
+        {"min_containers": 0, "max_containers": 1, "buffer_containers": 0, "scaledown_window": 300},
+        {},
+    ]
