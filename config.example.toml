@@ -13,3 +13,10 @@ system_prompt = "You are a helpful assistant. Answer clearly and accurately."
 request_timeout_seconds = 1200
 # Idle GPU containers remain billable; Modal scales down automatically (2..1200 seconds).
 gpu_idle_timeout_seconds = 300
+
+# Research: one paid Exa search, then one model call. EXA_API_KEY is environment-only.
+search_timeout_seconds = 60
+search_max_results = 5  # 1..5
+# Optional absolute executable path, useful for wheel installs or separate MCP installs.
+# Defaults to this checkout's mcp/node_modules/.bin/pi-web-access-mcp.
+# search_mcp_command = "/absolute/path/to/pi-web-access-mcp"

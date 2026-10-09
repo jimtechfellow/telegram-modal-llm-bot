@@ -1,0 +1,14 @@
+{
+  "provider": "exa",
+  "exaApiKey": "${EXA_API_KEY}",
+  "exaBaseUrl": "https://api.exa.ai",
+  "workflow": "none",
+  "maxInlineContentChars": 64000,
+  "webSearch": { "enabled": true, "allowedProviders": ["exa"] },
+  "tools": {
+    "webSearch": { "enabled": false },
+    "sourceCheck": { "enabled": true },
+    "getSearchContent": { "enabled": true },
+    "fetchContent": { "enabled": false }
+  }
+}

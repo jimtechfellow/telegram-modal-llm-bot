@@ -19,10 +19,21 @@ class Config:
     model_id: str = MODEL_ID
     model_revision: str = MODEL_REVISION
     gpu_idle_timeout_seconds: int = DEFAULT_GPU_IDLE_SECONDS
+    search_mcp_command: str | None = None
+    search_timeout_seconds: int = 60
+    search_max_results: int = 5
 
     def __post_init__(self):
         if type(self.gpu_idle_timeout_seconds) is not int or not 2 <= self.gpu_idle_timeout_seconds <= 1200:
             raise ValueError("GPU idle timeout must be an integer in 2..1200 seconds")
+        if type(self.search_timeout_seconds) is not int or not 5 <= self.search_timeout_seconds <= 90:
+            raise ValueError("Search timeout must be an integer in 5..90 seconds")
+        if type(self.search_max_results) is not int or not 1 <= self.search_max_results <= 5:
+            raise ValueError("Search results must be an integer in 1..5")
+        if self.search_mcp_command is not None and (
+            not isinstance(self.search_mcp_command, str) or not self.search_mcp_command.strip()
+        ):
+            raise ValueError("Search MCP command must be an executable path, not an empty value")
 
     @classmethod
     def load(cls, path: Path):

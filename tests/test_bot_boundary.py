@@ -41,7 +41,8 @@ class LocalBuilder:
         return LocalApplication()
 
 entry, phase, state = sys.argv[1:]
-config = SimpleNamespace(state_dir=Path(state), modal_environment="local-only")
+config = SimpleNamespace(state_dir=Path(state), modal_environment="local-only",
+                         search_mcp_command=None, search_timeout_seconds=60, search_max_results=5)
 logging.disable(logging.CRITICAL)
 with patch.object(Config, "load", return_value=config), \
      patch.object(Application, "builder", return_value=LocalBuilder()), \

@@ -98,6 +98,16 @@ def test_idle_timeout_rejects_invalid_configuration(config, seconds):
         replace(config, gpu_idle_timeout_seconds=seconds)
 
 
+@pytest.mark.parametrize("field,value", [
+    ("search_timeout_seconds", True), ("search_timeout_seconds", 4), ("search_timeout_seconds", 91),
+    ("search_max_results", True), ("search_max_results", 0), ("search_max_results", 6),
+    ("search_mcp_command", ""), ("search_mcp_command", 1),
+])
+def test_search_configuration_is_bounded(config, field, value):
+    with pytest.raises(ValueError, match="Search"):
+        replace(config, **{field: value})
+
+
 def test_old_config_defaults_to_five_minutes(repository, tmp_path):
     text = (repository / "config.example.toml").read_text()
     text = text.replace("REPLACE_WITH_VERIFIED_WORKSPACE", "fixture-workspace")

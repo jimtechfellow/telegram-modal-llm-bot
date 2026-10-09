@@ -11,10 +11,9 @@ from pathlib import Path
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from .backend import ModalBackend
 from .config import Config
 from .constants import MODEL_ID, MODEL_REVISION, VOLUME_NAME
-from .runner import Runner
+from .services import create_runner
 from .store import Store
 
 
@@ -33,7 +32,7 @@ def exclusive_bot_lock(state_dir):
 
 def build_application(config, token):
     store = Store(config.state_dir)
-    runner = Runner(config, store, ModalBackend(config))
+    runner = create_runner(config, store)
 
     async def authorized(update):
         chat, user, message = update.effective_chat, update.effective_user, update.effective_message
@@ -77,6 +76,7 @@ def build_application(config, token):
         lines = [f"模型：{MODEL_ID}", f"Revision：{MODEL_REVISION}", f"Volume：{VOLUME_NAME}"]
         lines += [
             f"本地任务：{last['status'] if last else '无'}",
+            f"业务阶段：{runner.phase}",
             f"可提交：{runner.ready}",
             f"空闲保留配置：{config.gpu_idle_timeout_seconds} 秒",
             f"最近确认空闲窗口：{runner.backend.effective_idle_seconds} 秒",
@@ -108,7 +108,7 @@ def build_application(config, token):
 
     async def unknown_handler(update, context):
         if await authorized(update):
-            await update.effective_message.reply_text("支持普通文本、/status、/stop。")
+            await update.effective_message.reply_text("支持普通文本、调研 XXX、/status、/stop。")
 
     async def post_init(application):
         # Refuse to hijack an already webhook-driven bot.

@@ -105,7 +105,7 @@ class Store:
         return [
             dict(row)
             for row in self.db.execute(
-                "SELECT * FROM jobs WHERE status IN ('starting', 'running', 'cancel_requested') "
+                "SELECT * FROM jobs WHERE status IN ('searching', 'starting', 'running', 'cancel_requested') "
                 "OR (status='completed' AND release_confirmed=0 AND error='gpu_release_requested')"
             )
         ]

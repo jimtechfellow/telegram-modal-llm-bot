@@ -37,6 +37,8 @@ private/
 admin-call*.json
 *.lock
 !uv.lock
+!mcp/package-lock.json
+node_modules/
 
 # Model weights and download caches (manifest contains metadata only)
 models/

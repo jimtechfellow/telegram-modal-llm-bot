@@ -22,7 +22,7 @@ Pinned Qwen3.8-27B-Uncensored BF16 weights
 - Results are sent after generation completes, not streamed token by token.
 - One inference at a time. Remote retries are disabled. Ambiguous submissions or unconfirmed release block further requests instead of silently resubmitting.
 - The first message starts a GPU container and loads the model. Subsequent messages reuse its engine while the container remains alive. `min_containers=0`, `buffer_containers=0`, `max_containers=1` and a finite `scaledown_window` let Modal automatically scale back to zero without a local timer or keepalive requests.
-- No web search, browser tools, agent loop, shell execution tools or image/video input. Current bot help/status messages are in Chinese; the model can answer in other languages.
+- Ordinary chat never calls web search. Explicit `调研 XXX` uses a separate Python Search Bot and the standalone `pi-web-access` MCP service, restricted to your paid Exa API. No agent loop, browser, model-executed shell, or image/video input. Reports are in Chinese with source URLs supplied by the search results, not invented by the model.
 
 ## Pinned model and runtime
 
@@ -106,6 +106,8 @@ Deployment/image builds and CPU downloads can consume billable provider resource
 ## Usage and shutdown checks
 
 Send ordinary text **without a leading slash** to request an answer. `/start` and other unsupported inputs return a short help message and do not invoke inference.
+
+For bounded research, send `调研 XXX` (a whitespace separator is required). See [Search Bot setup, limits, testing and known risks](docs/search-bot.md). Telegram remains only the UI; the `search_bot` package can be tested independently with a different `ReportModel`. Missing `EXA_API_KEY`, provider failures, or invalid citations fail explicitly; there is no free-search fallback or automatic retry. Research uses the same one-task admission, SQLite history, `/stop`, `/status` and GPU lifecycle as chat.
 
 - `/status`: reports the fixed model, local job state, configured/recently confirmed idle window, GPU container count, running inputs and backlog. It distinguishes warm idle residency from released compute. It never invokes inference or sends keepalives.
 - `/stop`: cancels the exact running call with container termination. When the GPU is already idle, it requests release by shortening this function's native idle window to 2 seconds, without launching another GPU call. Actual release is confirmed only when all three counters are zero; shutdown confirmation waits up to 90 seconds, after which new jobs remain blocked. The configured window is restored before the next request.
