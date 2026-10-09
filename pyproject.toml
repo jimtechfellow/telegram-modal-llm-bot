@@ -1,0 +1,33 @@
+[project]
+name = "modal-a100-chat"
+version = "0.1.0"
+description = "Private Telegram polling bot for fixed BF16 Qwen3.8-27B on single-use Modal A100-80GB"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<3.14"
+dependencies = ["modal==1.6.1", "python-telegram-bot==22.8"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12,<1"]
+
+[project.scripts]
+modal-a100-chat = "modal_a100_chat.bot:main"
+modal-a100-admin = "modal_a100_chat.admin:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/modal_a100_chat"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

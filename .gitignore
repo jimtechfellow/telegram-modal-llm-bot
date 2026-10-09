@@ -1,0 +1,59 @@
+# Python environments and build artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+
+# Secrets and local configuration; examples are safe to publish
+.env
+.env.*
+!.env.example
+.modal.toml
+.modal/
+config.toml
+config.local.toml
+credentials.json
+secrets.json
+bws-map*.json
+*.key
+*.pem
+*.cred
+
+# Conversation history and durable runtime state
+*.sqlite*
+*.db
+*.db-*
+state/
+runtime/
+private/
+admin-call*.json
+*.lock
+!uv.lock
+
+# Model weights and download caches (manifest contains metadata only)
+models/
+weights/
+checkpoints/
+.cache/
+*.safetensors
+*.gguf
+*.bin
+*.pt
+*.pth
+
+# Runtime logs and private deployment evidence
+logs/
+*.log
+*.out
+evidence/
+HANDOFF.md
+screenshots/
+.DS_Store

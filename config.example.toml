@@ -1,0 +1,13 @@
+# Copy to ~/.config/modal_a100_chat/config.toml and edit locally.
+# Zero is an invalid placeholder: replace BOTH ids with your own confirmed private ids.
+allowed_chat_id = 0
+allowed_user_id = 0
+modal_workspace = "REPLACE_WITH_VERIFIED_WORKSPACE"
+modal_environment = "main"
+
+# These fields validate the pinned target; they are not arbitrary model selectors.
+model_id = "orcarouter/Qwen3.8-27B-Uncensored"
+model_revision = "8cb32d72080f6a47bf34dc5adf8067daa6c63a31"
+state_dir = "~/.local/state/modal_a100_chat"
+system_prompt = "You are a helpful assistant. Answer clearly and accurately."
+request_timeout_seconds = 1200
