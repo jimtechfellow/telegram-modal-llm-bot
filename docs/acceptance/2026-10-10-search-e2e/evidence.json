@@ -1,0 +1,87 @@
+{
+  "code_commit": "5e75df857f94a1d0a7d60097b267925a26d69b09",
+  "exa_http": {
+    "request_count": 1,
+    "endpoint": "https://api.exa.ai/search",
+    "method": "POST",
+    "type": "auto",
+    "numResults": 5,
+    "status": 200,
+    "result_count": 5,
+    "costDollars": {
+      "total": 0.007,
+      "search": { "neural": 0.007 }
+    },
+    "returned_urls": [
+      "https://modal.com/blog/truly-serverless-gpus",
+      "https://blog.gitcode.com/ca1b624e28018c196692f9581e37675b.html",
+      "https://shilu.ai/articles/modal/blog-truly-serverless-gpus",
+      "https://modal.com/blog/gpu-mem-snapshots",
+      "https://hermesagent.org.cn/docs/user-guide/skills/optional/mlops/mlops-modal"
+    ]
+  },
+  "qwen": {
+    "inference_count": 1,
+    "max_output_tokens": 512,
+    "output_tokens": 185,
+    "prompt_tokens": 603,
+    "model_id": "orcarouter/Qwen3.8-27B-Uncensored",
+    "revision": "8cb32d72080f6a47bf34dc5adf8067daa6c63a31",
+    "loaded_dtype": "torch.bfloat16",
+    "gpu_name": "NVIDIA A100 80GB PCIe",
+    "engine_load_seconds": 146.799509699
+  },
+  "report_validation": {
+    "validated_at": "2026-10-10T12:04:36.728330+00:00",
+    "chinese_report": true,
+    "structured_output_and_source_ids_validated": true,
+    "report_urls_nonempty_and_subset_of_search_urls": true,
+    "report_file": "report.md",
+    "report_sha256": "e559e05bdf7af2c4c621306bed0b4c5b84086bf44e029679eb1d565b1f294d44",
+    "semantic_support_and_source_full_text": "NOT_INDEPENDENTLY_VERIFIED"
+  },
+  "sqlite_readback": {
+    "isolated_from_production": true,
+    "job_count": 1,
+    "message_count": 2,
+    "roles": ["user", "assistant"],
+    "job": {
+      "update_id": 1,
+      "status": "completed",
+      "call_id": "fc-01M4JV0Q5PF1CWM0FGW0J954TH",
+      "error": null,
+      "release_confirmed": 1
+    },
+    "assistant_matches_archived_report": true,
+    "note": "The earlier job snapshot preceded GPU release and had release_confirmed=0; the final database readback confirmed 1."
+  },
+  "gpu_recovery": {
+    "configured_idle_seconds": 300,
+    "observed_idle_seconds": 357.75,
+    "zero_observed_at": "2026-10-10T12:10:34.477338+00:00",
+    "stats": { "backlog": 0, "num_total_runners": 0, "num_running_inputs": 0, "input_headroom": 0 },
+    "test_app": {
+      "app_id": "ap-31vvEU3sGQ8zWTH0J5UZ3z",
+      "state": "stopped",
+      "tasks": "0",
+      "created_at": "2026-10-10 12:01:09+00:00",
+      "stopped_at": "2026-10-10 12:10:36+00:00"
+    },
+    "containers_after_stop": [],
+    "existing_model_volume_preserved": true
+  },
+  "modal_billing": {
+    "object_id": "ap-31vvEU3sGQ8zWTH0J5UZ3z",
+    "environment_name": "gpu-reuse-accept-20261009",
+    "interval_start": "2026-10-10 12:00:00+00:00",
+    "cost": "0.52845521",
+    "cost_by_resource": {
+      "CPU": "0.02894616",
+      "A100-80GB": "0.38212137",
+      "Memory": "0.11738768"
+    },
+    "verified_at": "2026-10-10T12:11:47.523545+00:00",
+    "note": "Provider-reported usage, stable across two reads; credits, taxes and final settlement are not asserted."
+  },
+  "redaction_scope": "No credentials, credential UUIDs, Telegram identities, SQLite binary, production Volume ID, local absolute paths, raw credential-bearing HTTP headers or execution scripts are archived. Test resource IDs are non-credential correlation identifiers."
+}

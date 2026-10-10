@@ -1,0 +1,46 @@
+{
+  "result": "PASS",
+  "environment": "gpu-reuse-accept-20261009",
+  "budget_usd": 2,
+  "telegram": "NOT_TESTED",
+  "model_volume_id": "[redacted: existing model Volume]",
+  "model_mount": "read_only; no download or copy",
+  "app_id": "ap-31vvEU3sGQ8zWTH0J5UZ3z",
+  "function_id": "fu-86HnARDqVwvJMLCmbkwIZQ",
+  "sqlite_path": "[isolated temporary directory]/state/history.sqlite3",
+  "calls": {
+    "search": 1,
+    "inference": 1
+  },
+  "call_id": "fc-01M4JV0Q5PF1CWM0FGW0J954TH",
+  "automatic_gpu_recovery": true,
+  "final_stats_before_stop": {
+    "backlog": 0,
+    "num_total_runners": 0,
+    "num_running_inputs": 0,
+    "input_headroom": 0
+  },
+  "report_and_sqlite": "PASS",
+  "cleanup_stats": {
+    "backlog": 0,
+    "num_total_runners": 0,
+    "num_running_inputs": 0,
+    "input_headroom": 0
+  },
+  "test_app_stopped": true,
+  "containers_after_stop": [],
+  "model_volume_preserved": true,
+  "modal_reported_cost_usd": 0.52845521,
+  "exa_response_cost_usd": 0.007,
+  "combined_usage_cost_usd": 0.53545521,
+  "billing_verified_at": "2026-10-10T12:11:47.523545+00:00",
+  "billing_stable_across_reads": true,
+  "source_count": 5,
+  "output_tokens": 185,
+  "automatic_release_observed_idle_seconds": 357.75,
+  "elapsed_seconds": 571.69,
+  "redactions": [
+    "Production model Volume ID replaced with a descriptive label.",
+    "Temporary SQLite absolute path replaced with a descriptive label."
+  ]
+}
